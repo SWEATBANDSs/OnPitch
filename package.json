@@ -1,0 +1,12 @@
+{
+  "name": "onpitch",
+  "version": "0.1.0",
+  "description": "Competitive 6-a-side player recruitment: teams short of players call, tiered players respond.",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  }
+}

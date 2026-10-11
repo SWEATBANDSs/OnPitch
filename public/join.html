@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OnPitch – Join</title>
+<link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<h1>OnPitch</h1>
+<p class="muted">Competitive 6-a-side. Leave your name and number and we'll be in touch – no app sign-up needed.</p>
+<form id="f" class="card">
+  <label>Name <input name="name" required maxlength="80" autocomplete="name"></label>
+  <label>Mobile <input name="phone" type="tel" required autocomplete="tel"></label>
+  <button>Count me in</button>
+  <p id="msg" class="muted" role="status"></p>
+</form></main>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/leads', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...Object.fromEntries(new FormData(e.target)), source: 'plaque' }) });
+  const d = await r.json();
+  document.getElementById('msg').textContent = r.ok ? "Thanks! We'll text you soon." : d.error;
+  if (r.ok) e.target.reset();
+});
+</script></body></html>
