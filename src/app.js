@@ -34,8 +34,7 @@ export function createApp(svc, { adminToken } = {}) {
   add('DELETE', '/api/calls/:id/claims/me', (c) => svc.withdraw(c.user, c.params.id));
   add('POST', '/api/calls/:id/claims/:pid/accept', (c) => svc.decide(c.user, c.params.id, c.params.pid, true));
   add('POST', '/api/calls/:id/claims/:pid/decline', (c) => svc.decide(c.user, c.params.id, c.params.pid, false));
-  add('POST', '/api/calls/:id/attendance/:pid', (c) =>
-    svc.attendance(c.user, c.params.id, c.params.pid, c.body.attended, c.body.rating));
+  add('POST', '/api/calls/:id/attendance/:pid', (c) => svc.attendance(c.user, c.params.id, c.params.pid, c.body));
   add('GET', '/api/notifications', (c) => svc.inbox(c.user));
   add('POST', '/api/notifications/read', (c) => { svc.markRead(c.user); return { ok: true }; });
   add('POST', '/api/leads', (c) => svc.addLead(c.body), { auth: false });

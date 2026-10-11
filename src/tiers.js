@@ -1,5 +1,4 @@
-// Player tiering. Self-rating is the starting point; organiser ratings left after
-// games gradually take over, so tiers become self-policing over time.
+// Player tiering.
 export const TIERS = [
   { id: 1, name: 'Social' },
   { id: 2, name: 'Club' },
@@ -9,31 +8,24 @@ export const TIERS = [
 
 export const tierName = (id) => TIERS.find((t) => t.id === id)?.name ?? 'Unknown';
 
-export function selfScore(p) {
-  return (p.skill * 2 + p.athleticism) / 3;
-}
-
-// Peer ratings carry up to 70% of the weight once a player has 5+ ratings.
-export function effectiveScore(p) {
-  const self = selfScore(p);
-  const ratings = p.peerRatings ?? [];
-  if (!ratings.length) return self;
-  const peer = ratings.reduce((a, b) => a + b, 0) / ratings.length;
-  const w = Math.min(ratings.length / 5, 1) * 0.7;
-  return self * (1 - w) + peer * w;
-}
-
+// Tiers are purely self-declared: it's not our place to rank grassroots footballers' ability.
 export function tierFor(p) {
-  const s = effectiveScore(p);
+  const s = (p.skill * 2 + p.athleticism) / 3;
   if (s < 4) return 1;
   if (s < 6) return 2;
   if (s < 8) return 3;
   return 4;
 }
 
-// Share of confirmed games actually attended; null until there is history.
-export function reliability(p) {
-  const { attended = 0, noShows = 0 } = p.history ?? {};
-  const total = attended + noShows;
-  return total ? attended / total : null;
+const share = (yes = 0, no = 0) => (yes + no ? yes / (yes + no) : null);
+
+// What organisers record after a game. Each is a share (0-1), or null until there is history.
+// reliability: showed up; badge: played for the badge; wouldHaveBack: would have them again.
+export function record(p) {
+  const h = p.history ?? {};
+  return {
+    reliability: share(h.attended, h.noShows),
+    badge: share(h.badgeYes, h.badgeNo),
+    wouldHaveBack: share(h.backYes, h.backNo),
+  };
 }

@@ -14,11 +14,18 @@ async function api(path, method = 'GET', body) {
   return d;
 }
 const when = (iso) => new Date(iso).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const pct = (v) => Math.round(v * 100) + '%';
+// Organiser-recorded history: showed up / played for the badge / would have back.
+const recordText = (p, bare) => {
+  const bits = [p.reliability != null && `${pct(p.reliability)} showed up`, p.badge != null && `${pct(p.badge)} played for the badge`,
+    p.wouldHaveBack != null && `${pct(p.wouldHaveBack)} would have back`].filter(Boolean);
+  return bits.join(' · ') || (bare ? '' : 'new');
+};
 const form = (el) => Object.fromEntries(new FormData(el));
 const act = (fn) => async (...a) => { try { error = ''; await fn(...a); } catch (e) { error = e.message; } render(); };
 
 function signupView() {
-  app.innerHTML = `<h1>OnPitch</h1><p class="muted">Competitive 6-a-side. Rate yourself honestly – organisers will rate you after games.</p>
+  app.innerHTML = `<h1>OnPitch</h1><p class="muted">Competitive 6-a-side. Tell us your level honestly – it's your call, and it decides which games you're called for.</p>
   <form id="f" class="card">
     <label>Name<input name="name" required></label>
     <label>Mobile<input name="phone" type="tel" required></label>
@@ -54,10 +61,12 @@ async function myView() {
   return `<h2>My games</h2>` + (calls.map((c) => {
     if (!c.isOrganiser) return callCard(c, `<p class="muted">Your claim: ${c.myClaim?.status}</p>${c.myClaim?.status === 'accepted' ? `<a href="${esc(c.organiser.whatsapp)}">WhatsApp ${esc(c.organiser.name)}</a>` : ''}`);
     const past = new Date(c.startsAt) < new Date();
-    const claims = c.claims.map((p) => `<div class="muted">${esc(p.name)} · ${esc(p.tierName)} · skill ${p.skill}/ath ${p.athleticism} · ${p.reliability == null ? 'new' : Math.round(p.reliability * 100) + '% reliable'} — ${p.status}
+    const claims = c.claims.map((p) => `<div class="muted">${esc(p.name)} · ${esc(p.tierName)} · skill ${p.skill}/ath ${p.athleticism} · ${recordText(p)} — ${p.status}
       ${p.status === 'pending' ? `<button data-accept="${c.id}|${p.id}">Accept</button><button class="sec" data-decline="${c.id}|${p.id}">Decline</button>` : ''}
       ${p.status === 'accepted' ? `<a href="${esc(p.whatsapp)}">WhatsApp</a>` : ''}
-      ${p.status === 'accepted' && past && p.attended == null ? `<input type="number" min="1" max="10" placeholder="rating" id="r-${p.id}" style="width:90px"><button data-att="${c.id}|${p.id}|1">Played</button><button class="bad" data-att="${c.id}|${p.id}|0">No-show</button>` : ''}</div>`).join('');
+      ${p.status === 'accepted' && past && p.attended == null ? `<div><label><input type="checkbox" id="b-${p.id}" checked style="width:auto"> Played for the badge</label>
+        <label><input type="checkbox" id="w-${p.id}" checked style="width:auto"> Would have back</label>
+        <button data-att="${c.id}|${p.id}|1">Showed up</button><button class="bad" data-att="${c.id}|${p.id}|0">No-show</button></div>` : ''}</div>`).join('');
     return callCard(c, `${claims}${c.status !== 'cancelled' ? `<button class="sec" data-edit="${c.id}">Change time/venue</button><button class="bad" data-cancel="${c.id}">Cancel</button>` : ''}`);
   }).join('') || '<p class="muted">No games yet.</p>');
 }
@@ -85,7 +94,7 @@ async function render() {
   let html = '';
   try { html = await views[tab](); } catch (e) { error = e.message; }
   app.innerHTML = `<h1>OnPitch</h1><div class="muted">${esc(me.name)} · <span class="tag">${esc(me.tierName)}</span>
-    ${me.reliability == null ? '' : Math.round(me.reliability * 100) + '% reliable'} <a href="#" id="out">sign out</a></div>
+    ${recordText(me, true)} <a href="#" id="out">sign out</a></div>
     <nav>${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : 'sec'}" data-tab="${k}">${l}</button>`).join('')}</nav>
     <p class="err">${esc(error)}</p>${html}`;
   $('#out').onclick = () => { localStorage.removeItem('token'); token = null; render(); };
@@ -96,7 +105,9 @@ async function render() {
   on('accept', ([id, p]) => api(`/calls/${id}/claims/${p}/accept`, 'POST'));
   on('decline', ([id, p]) => api(`/calls/${id}/claims/${p}/decline`, 'POST'));
   on('cancel', ([id]) => confirm('Cancel this call and notify everyone?') && api(`/calls/${id}/cancel`, 'POST'));
-  on('att', ([id, p, a]) => api(`/calls/${id}/attendance/${p}`, 'POST', { attended: a === '1', rating: $('#r-' + p)?.value || undefined }));
+  on('att', ([id, p, a]) => api(`/calls/${id}/attendance/${p}`, 'POST', a === '1'
+    ? { attended: true, playedForBadge: $('#b-' + p).checked, wouldHaveBack: $('#w-' + p).checked }
+    : { attended: false }));
   on('edit', async ([id]) => {
     const venue = prompt('New venue (leave blank to keep)'); const t = prompt('New kick-off, e.g. 2026-10-20T19:30 (blank to keep)');
     const body = {}; if (venue) body.venue = venue; if (t) body.startsAt = t;

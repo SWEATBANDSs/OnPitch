@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { tierFor, tierName, reliability, TIERS } from './tiers.js';
+import { tierFor, tierName, record, TIERS } from './tiers.js';
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -45,7 +45,7 @@ export class Service {
       id: p.id, name: p.name, age: p.age, bio: p.bio, area: p.area,
       skill: p.skill, athleticism: p.athleticism,
       tier: tierFor(p), tierName: tierName(tierFor(p)),
-      reliability: reliability(p), ratings: (p.peerRatings ?? []).length,
+      ...record(p),
     };
   }
 
@@ -64,7 +64,7 @@ export class Service {
       age: int(b.age, 'age', 16, 80), bio: str(b.bio, 'bio', 500, false),
       area: str(b.area, 'area', 80, false) || 'Thanet',
       skill: int(b.skill, 'skill', 1, 10), athleticism: int(b.athleticism, 'athleticism', 1, 10),
-      peerRatings: [], history: { attended: 0, noShows: 0 }, createdAt: this.now().toISOString(),
+      history: { attended: 0, noShows: 0, badgeYes: 0, badgeNo: 0, backYes: 0, backNo: 0 }, createdAt: this.now().toISOString(),
     };
     this.s.data.players.push(p);
     this.s.save();
@@ -231,18 +231,25 @@ export class Service {
     return this.view(call, org);
   }
 
-  // After the game: organiser records attendance and optionally rates the player (1-10).
-  attendance(org, id, playerId, attended, rating) {
+  // After the game the organiser records three yes/no facts: showed up, played for the badge,
+  // would have them back. The last two are optional and only apply if the player showed up.
+  attendance(org, id, playerId, { attended, playedForBadge, wouldHaveBack } = {}) {
     const call = this.call(id);
     this.own(call, org);
     if (new Date(call.startsAt) > this.now()) fail(409, 'The game has not happened yet');
     const c = call.claims.find((x) => x.playerId === playerId && x.status === 'accepted');
     if (!c) fail(404, 'Player was not confirmed for this game');
     if (c.attended !== undefined && c.attended !== null) fail(409, 'Attendance already recorded');
-    const p = this.player(playerId);
-    c.attended = !!attended;
-    p.history[attended ? 'attended' : 'noShows']++;
-    if (attended && rating !== undefined && rating !== null) p.peerRatings.push(int(rating, 'rating', 1, 10));
+    const bool = (v, name) => { if (v !== undefined && v !== null && typeof v !== 'boolean') fail(400, `${name} must be true or false`); return v; };
+    if (typeof attended !== 'boolean') fail(400, 'attended must be true or false');
+    bool(playedForBadge, 'playedForBadge'); bool(wouldHaveBack, 'wouldHaveBack');
+    const h = this.player(playerId).history;
+    c.attended = attended;
+    h[attended ? 'attended' : 'noShows']++;
+    if (attended) {
+      if (typeof playedForBadge === 'boolean') { c.playedForBadge = playedForBadge; h[playedForBadge ? 'badgeYes' : 'badgeNo']++; }
+      if (typeof wouldHaveBack === 'boolean') { c.wouldHaveBack = wouldHaveBack; h[wouldHaveBack ? 'backYes' : 'backNo']++; }
+    }
     this.s.save();
     return this.view(call, org);
   }

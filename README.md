@@ -31,7 +31,7 @@ npm test
 | Monetisation toggle | `SLOT_FEE_PENCE` (undecided: per-slot vs tiered access) |
 
 ### Decisions on the open questions
-- **Tier policing:** self-rating is the starting point. After each game the organiser records attendance and can rate the player 1-10; peer ratings blend into the score (up to 70% weight at 5+ ratings), so inflated self-ratings correct themselves and tiers move. No-shows reduce the reliability score shown to organisers.
+- **Tier policing:** none, deliberately. Ranking grassroots footballers' ability isn't our place, so the tier is whatever the player declares. After each game the organiser records only three yes/no facts: **showed up**, **played for the badge**, **would have back**. Profiles show these as percentages once there is history, and they never change the tier.
 - **Chat:** fully off-app; `wa.me` links appear after confirmation.
 - **Platform:** web-first, mobile-friendly, vanilla JS (no build step).
 

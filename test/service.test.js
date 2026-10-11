@@ -92,21 +92,41 @@ test('withdrawal of a confirmed player reopens the slot', () => {
   assert.equal(svc.getCall(org, c.id).status, 'open');
 });
 
-test('attendance feeds reliability and organiser ratings move the tier', () => {
+test('after-game record: showed up / played for the badge / would have back; tier stays self-declared', () => {
   const { svc, reg } = setup();
-  const org = reg('Org', 7); const a = reg('Overrater', 8);
-  for (let n = 0; n < 5; n++) {
+  const org = reg('Org', 7); const a = reg('A', 8);
+  const tierBefore = svc.me(a).tier;
+  assert.deepEqual([svc.me(a).reliability, svc.me(a).badge, svc.me(a).wouldHaveBack], [null, null, null]);
+  const play = (start, now, fn) => {
     clock = new Date('2026-10-01T12:00:00Z');
-    const { call: c } = svc.createCall(org, call({ startsAt: '2026-10-02T19:00:00Z', minTier: 1 }));
+    const { call: c } = svc.createCall(org, call({ startsAt: start, minTier: 1 }));
     svc.claim(a, c.id); svc.decide(org, c.id, a.id, true);
-    assert.equal(code(() => svc.attendance(org, c.id, a.id, true, 3)), 409); // not played yet
-    clock = new Date('2026-10-03T00:00:00Z');
-    svc.attendance(org, c.id, a.id, true, 3);
-    assert.equal(code(() => svc.attendance(org, c.id, a.id, true, 3)), 409); // once only
-  }
+    clock = new Date(now);
+    fn(c);
+  };
+  play('2026-10-02T19:00:00Z', '2026-10-03T00:00:00Z', (c) => {
+    svc.attendance(org, c.id, a.id, { attended: true, playedForBadge: true, wouldHaveBack: false });
+    assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: true })), 409); // once only
+  });
+  play('2026-10-09T19:00:00Z', '2026-10-10T00:00:00Z', (c) => {
+    assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: 'yes' })), 400);
+    svc.attendance(org, c.id, a.id, { attended: false, playedForBadge: false }); // badge/back ignored for no-shows
+  });
   const p = svc.me(a);
-  assert.equal(p.reliability, 1);
-  assert.ok(p.tier < 4, `self-rated 8 but rated 3 by peers should drop (tier ${p.tier})`);
+  assert.equal(p.reliability, 0.5);
+  assert.equal(p.badge, 1);
+  assert.equal(p.wouldHaveBack, 0);
+  assert.equal(p.tier, tierBefore);
+  assert.equal(code(() => svc.attendance(a, '', a.id, { attended: true })), 404);
+});
+
+test('attendance cannot be recorded before the game or by non-organisers', () => {
+  const { svc, reg } = setup();
+  const org = reg('Org', 7); const a = reg('A', 7);
+  const { call: c } = svc.createCall(org, call());
+  svc.claim(a, c.id); svc.decide(org, c.id, a.id, true);
+  assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: true })), 409);
+  assert.equal(code(() => svc.attendance(a, c.id, a.id, { attended: true })), 403);
 });
 
 test('cancel notifies claimants; past calls rejected', () => {
