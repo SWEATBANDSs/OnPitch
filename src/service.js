@@ -27,6 +27,21 @@ const when = (v) => {
   if (Number.isNaN(d.getTime())) fail(400, 'startsAt must be a valid date/time');
   return d.toISOString();
 };
+const PLATFORMS = { 'leisure-leagues': 'Leisure Leagues', powerleague: 'Powerleague', other: 'Other' };
+const platform = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  if (!PLATFORMS[v]) fail(400, `platform must be one of ${Object.keys(PLATFORMS).join(', ')}`);
+  return v;
+};
+// Optional link to the fixture on the league's own site, for players to check. Not verified by us.
+const fixtureUrl = (v) => {
+  const s = str(v, 'fixtureUrl', 300, false);
+  if (!s) return null;
+  let u;
+  try { u = new URL(s); } catch { fail(400, 'fixtureUrl must be a valid link'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') fail(400, 'fixtureUrl must be an http(s) link');
+  return u.href;
+};
 const wa = (p) => `https://wa.me/${p.replace(/^\+/, '').replace(/^0/, '44')}`;
 
 // notifier(playerId, notification) is the delivery hook (push/SMS). The in-app inbox
@@ -62,6 +77,15 @@ export class Service {
     }
     const squads = this.s.data.players.filter((o) => o.squad.includes(p.id)).length;
     return { matches, noShows, squads, reliability: matches + noShows ? matches / (matches + noShows) : null };
+  }
+
+  // Lets a stranger see a team has really run games: games that kicked off (not cancelled)
+  // with at least one confirmed player, plus how many squads they run.
+  organiserStats(org) {
+    const now = this.now();
+    const matchesOrganised = this.s.data.calls.filter((c) => c.organiserId === org.id && c.status !== 'cancelled'
+      && new Date(c.startsAt) <= now && c.claims.some((x) => x.status === 'accepted')).length;
+    return { matchesOrganised, squads: this.stats(org).squads };
   }
 
   inSquad(orgId, playerId) { return !!this.player(orgId)?.squad.includes(playerId); }
@@ -127,6 +151,7 @@ export class Service {
       team: str(b.team, 'team', 80), venue: str(b.venue, 'venue', 120), startsAt,
       slots: int(b.slots, 'slots', 1, 6), minTier: int(b.minTier ?? 1, 'minTier', 1, TIERS.length),
       notes: str(b.notes, 'notes', 300, false),
+      platform: platform(b.platform), fixtureUrl: fixtureUrl(b.fixtureUrl),
       status: 'open', claims: [], createdAt: this.now().toISOString(),
     };
     this.s.data.calls.push(call);
@@ -151,7 +176,9 @@ export class Service {
     const out = {
       id: call.id, team: call.team, venue: call.venue, startsAt: call.startsAt, slots: call.slots,
       minTier: call.minTier, minTierName: tierName(call.minTier), notes: call.notes, status: call.status,
-      filled: this.confirmed(call).length, organiser: { id: org.id, name: org.name },
+      platform: call.platform ?? null, platformName: PLATFORMS[call.platform] ?? null,
+      fixtureUrl: call.fixtureUrl ?? null, fixtureHost: call.fixtureUrl ? new URL(call.fixtureUrl).hostname : null,
+      filled: this.confirmed(call).length, organiser: { id: org.id, name: org.name, ...this.organiserStats(org) },
       isOrganiser: isOrg, slotFeePence: this.slotFeePence,
     };
     if (mine) {
@@ -194,6 +221,8 @@ export class Service {
       changes.push(`time now ${this.fmt(call.startsAt)}`);
     }
     if (b.notes !== undefined) call.notes = str(b.notes, 'notes', 300, false);
+    if (b.platform !== undefined) call.platform = platform(b.platform);
+    if (b.fixtureUrl !== undefined) call.fixtureUrl = fixtureUrl(b.fixtureUrl);
     if (changes.length) {
       for (const c of call.claims.filter((x) => x.status === 'accepted' || x.status === 'pending')) {
         this.notify(c.playerId, 'change', call.id, `Fixture change – ${call.team}: ${changes.join(', ')}`);

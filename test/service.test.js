@@ -183,3 +183,28 @@ test('leads dedupe by number', () => {
   svc.addLead({ name: 'Sam', phone: '07700900123' }); svc.addLead({ name: 'Sam', phone: '07700900123' });
   assert.equal(svc.leads().length, 1);
 });
+
+test('platform and fixture link are validated and shown; organiser track record is derived', () => {
+  const { svc, reg } = setup();
+  const org = reg('Org', 7); const a = reg('A', 7);
+  assert.equal(code(() => svc.createCall(org, call({ platform: 'sunday-league' }))), 400);
+  assert.equal(code(() => svc.createCall(org, call({ fixtureUrl: 'javascript:alert(1)' }))), 400);
+  assert.equal(code(() => svc.createCall(org, call({ fixtureUrl: 'not a url' }))), 400);
+
+  const { call: c } = svc.createCall(org, call({ platform: 'leisure-leagues', fixtureUrl: 'https://www.leisureleagues.net/fixtures/123' }));
+  const v = svc.getCall(a, c.id);
+  assert.equal(v.platformName, 'Leisure Leagues');
+  assert.equal(v.fixtureHost, 'www.leisureleagues.net');
+  assert.equal(v.organiser.matchesOrganised, 0);
+  assert.equal(svc.createCall(org, call()).call.platform, null);
+
+  // A game counts for the organiser only once it has kicked off with a confirmed player.
+  svc.claim(a, c.id); svc.decide(org, c.id, a.id, true);
+  assert.equal(svc.getCall(a, c.id).organiser.matchesOrganised, 0);
+  clock = new Date('2026-10-09T00:00:00Z');
+  assert.equal(svc.getCall(a, c.id).organiser.matchesOrganised, 1); // the empty call doesn't count
+  svc.addToSquad(a, org.id);
+  assert.equal(svc.getCall(a, c.id).organiser.squads, 1);
+
+  assert.equal(svc.editCall(org, c.id, { fixtureUrl: '' }).fixtureUrl, null);
+});

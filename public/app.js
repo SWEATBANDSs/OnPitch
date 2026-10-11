@@ -45,7 +45,9 @@ function signupView() {
 const callCard = (c, extra = '') => `<div class="card"><strong>${esc(c.team)}</strong>
   <span class="tag">${esc(c.minTierName)}+</span><span class="tag">${c.filled}/${c.slots} filled</span>
   ${c.status !== 'open' ? `<span class="tag">${esc(c.status)}</span>` : ''}
-  <div>${esc(c.venue)} · ${when(c.startsAt)}</div><div class="muted">${esc(c.notes)}</div>${extra}</div>`;
+  <div>${esc(c.venue)} · ${when(c.startsAt)}</div><div class="muted">${esc(c.notes)}</div>
+  <div class="muted">Organiser ${esc(c.organiser.name)}: ${c.organiser.matchesOrganised} game${c.organiser.matchesOrganised === 1 ? '' : 's'} run${c.organiser.squads ? ` · in ${c.organiser.squads} squad${c.organiser.squads === 1 ? '' : 's'}` : ''}</div>
+  ${c.fixtureUrl ? `<div class="muted">${esc(c.platformName ?? 'Fixture')}: <a href="${esc(c.fixtureUrl)}" target="_blank" rel="noopener noreferrer">${esc(c.fixtureHost)}</a> <em>(link from organiser, not verified)</em></div>` : c.platformName ? `<div class="muted">Plays on ${esc(c.platformName)}</div>` : ''}${extra}</div>`;
 
 async function findView() {
   const calls = await api('/calls');
@@ -77,7 +79,10 @@ function postView() {
     <label>Kick-off<input name="startsAt" type="datetime-local" value="${v}" required></label>
     <div class="row"><label>Players needed<input name="slots" type="number" min="1" max="6" value="1"></label>
     <label>Minimum tier<select name="minTier"><option value="1">Social</option><option value="2">Club</option><option value="3" selected>Competitive</option><option value="4">Elite</option></select></label></div>
-    <label>Notes<input name="notes" placeholder="Bibs, level, subs…"></label><button>Send call</button></form>`;
+    <label>Notes<input name="notes" placeholder="Bibs, level, subs…"></label>
+    <div class="row"><label>League platform<select name="platform"><option value="">Not in a league</option><option value="leisure-leagues">Leisure Leagues</option><option value="powerleague">Powerleague</option><option value="other">Other</option></select></label>
+    <label>Fixture link (optional)<input name="fixtureUrl" type="url" placeholder="https://…"></label></div>
+    <button>Send call</button></form>`;
 }
 
 async function inboxView() {

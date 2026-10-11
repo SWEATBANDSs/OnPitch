@@ -26,6 +26,8 @@ npm test
 | Tiering: Social / Club / Competitive / Elite | `src/tiers.js` |
 | Call-and-response matching, tier-gated | `POST /api/calls`, `POST /api/calls/:id/claims`, accept/decline |
 | App owns roster; contacts revealed only once confirmed (WhatsApp handoff) | `Service.view()` |
+| League link: optional platform (Leisure Leagues / Powerleague / other) + fixture URL on each call. Shown to players as an unverified link; no league API integration | `Service.createCall()` |
+| Organiser track record (games run, squads) shown on every call so strangers can judge a ringer request | `Service.organiserStats()` |
 | Fixture-change / cancel / drop-out notifications | `PATCH /api/calls/:id`, in-app inbox + `notifier` hook |
 | QR-plaque lead capture (name + number, no app sign-up) | `/join`, `POST /api/leads` |
 | Monetisation toggle | `SLOT_FEE_PENCE` (undecided: per-slot vs tiered access) |
