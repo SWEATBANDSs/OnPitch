@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { tierFor, tierName, record, TIERS } from './tiers.js';
+import { tierFor, tierName, TIERS } from './tiers.js';
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -45,8 +45,39 @@ export class Service {
       id: p.id, name: p.name, age: p.age, bio: p.bio, area: p.area,
       skill: p.skill, athleticism: p.athleticism,
       tier: tierFor(p), tierName: tierName(tierFor(p)),
-      ...record(p),
+      ...this.stats(p),
     };
+  }
+
+  // Derived, never hand-entered: a confirmed player has "played" once kick-off passes unless
+  // the organiser flagged a no-show. Squads = how many organisers have added them.
+  stats(p) {
+    const now = this.now();
+    let matches = 0, noShows = 0;
+    for (const c of this.s.data.calls) {
+      if (c.status === 'cancelled' || new Date(c.startsAt) > now) continue;
+      const cl = c.claims.find((x) => x.playerId === p.id && x.status === 'accepted');
+      if (!cl) continue;
+      if (cl.noShow) noShows++; else matches++;
+    }
+    const squads = this.s.data.players.filter((o) => o.squad.includes(p.id)).length;
+    return { matches, noShows, squads, reliability: matches + noShows ? matches / (matches + noShows) : null };
+  }
+
+  inSquad(orgId, playerId) { return !!this.player(orgId)?.squad.includes(playerId); }
+
+  addToSquad(org, playerId) {
+    if (playerId === org.id) fail(400, 'You cannot add yourself');
+    if (!this.player(playerId)) fail(404, 'Player not found');
+    if (!org.squad.includes(playerId)) org.squad.push(playerId);
+    this.s.save();
+    return { squad: org.squad.length };
+  }
+
+  removeFromSquad(org, playerId) {
+    org.squad = org.squad.filter((id) => id !== playerId);
+    this.s.save();
+    return { squad: org.squad.length };
   }
 
   auth(token) {
@@ -64,7 +95,7 @@ export class Service {
       age: int(b.age, 'age', 16, 80), bio: str(b.bio, 'bio', 500, false),
       area: str(b.area, 'area', 80, false) || 'Thanet',
       skill: int(b.skill, 'skill', 1, 10), athleticism: int(b.athleticism, 'athleticism', 1, 10),
-      history: { attended: 0, noShows: 0, badgeYes: 0, badgeNo: 0, backYes: 0, backNo: 0 }, createdAt: this.now().toISOString(),
+      squad: [], createdAt: this.now().toISOString(),
     };
     this.s.data.players.push(p);
     this.s.save();
@@ -99,7 +130,7 @@ export class Service {
       status: 'open', claims: [], createdAt: this.now().toISOString(),
     };
     this.s.data.calls.push(call);
-    const eligible = this.s.data.players.filter((p) => p.id !== org.id && tierFor(p) >= call.minTier);
+    const eligible = this.s.data.players.filter((p) => p.id !== org.id && (tierFor(p) >= call.minTier || org.squad.includes(p.id)));
     for (const p of eligible) {
       this.notify(p.id, 'call', call.id,
         `${call.team} need ${call.slots} player${call.slots > 1 ? 's' : ''} at ${call.venue}, ${this.fmt(call.startsAt)}`);
@@ -130,7 +161,7 @@ export class Service {
     if (isOrg) {
       out.claims = call.claims.map((c) => {
         const p = this.player(c.playerId);
-        const row = { ...this.publicPlayer(p), status: c.status, claimedAt: c.claimedAt, attended: c.attended ?? null };
+        const row = { ...this.publicPlayer(p), status: c.status, claimedAt: c.claimedAt, noShow: !!c.noShow, inSquad: this.inSquad(org.id, p.id) };
         if (c.status === 'accepted') Object.assign(row, { phone: p.phone, whatsapp: wa(p.phone) });
         return row;
       });
@@ -142,7 +173,7 @@ export class Service {
     const now = this.now();
     const rows = this.s.data.calls.filter((c) => {
       if (mine) return c.organiserId === viewer.id || c.claims.some((x) => x.playerId === viewer.id);
-      return c.status === 'open' && new Date(c.startsAt) > now && c.organiserId !== viewer.id && tierFor(viewer) >= c.minTier;
+      return c.status === 'open' && new Date(c.startsAt) > now && c.organiserId !== viewer.id && (tierFor(viewer) >= c.minTier || this.inSquad(c.organiserId, viewer.id));
     });
     return rows.sort((a, b) => a.startsAt.localeCompare(b.startsAt)).map((c) => this.view(c, viewer));
   }
@@ -189,7 +220,7 @@ export class Service {
     const call = this.call(id);
     if (call.organiserId === p.id) fail(400, 'You organised this call');
     if (call.status !== 'open' || new Date(call.startsAt) <= this.now()) fail(409, 'This call is no longer open');
-    if (tierFor(p) < call.minTier) fail(403, `Needs ${tierName(call.minTier)} tier or above`);
+    if (tierFor(p) < call.minTier && !this.inSquad(call.organiserId, p.id)) fail(403, `Needs ${tierName(call.minTier)} tier or above`);
     const existing = call.claims.find((c) => c.playerId === p.id);
     if (existing && existing.status !== 'withdrawn') fail(409, 'You have already claimed a slot');
     if (existing) { existing.status = 'pending'; existing.claimedAt = this.now().toISOString(); }
@@ -231,25 +262,16 @@ export class Service {
     return this.view(call, org);
   }
 
-  // After the game the organiser records three yes/no facts: showed up, played for the badge,
-  // would have them back. The last two are optional and only apply if the player showed up.
-  attendance(org, id, playerId, { attended, playedForBadge, wouldHaveBack } = {}) {
+  // Nobody has to log games: confirmed players count as played once kick-off passes. The
+  // organiser only flags the exception (a no-show), and can undo it.
+  setNoShow(org, id, playerId, noShow) {
     const call = this.call(id);
     this.own(call, org);
     if (new Date(call.startsAt) > this.now()) fail(409, 'The game has not happened yet');
     const c = call.claims.find((x) => x.playerId === playerId && x.status === 'accepted');
     if (!c) fail(404, 'Player was not confirmed for this game');
-    if (c.attended !== undefined && c.attended !== null) fail(409, 'Attendance already recorded');
-    const bool = (v, name) => { if (v !== undefined && v !== null && typeof v !== 'boolean') fail(400, `${name} must be true or false`); return v; };
-    if (typeof attended !== 'boolean') fail(400, 'attended must be true or false');
-    bool(playedForBadge, 'playedForBadge'); bool(wouldHaveBack, 'wouldHaveBack');
-    const h = this.player(playerId).history;
-    c.attended = attended;
-    h[attended ? 'attended' : 'noShows']++;
-    if (attended) {
-      if (typeof playedForBadge === 'boolean') { c.playedForBadge = playedForBadge; h[playedForBadge ? 'badgeYes' : 'badgeNo']++; }
-      if (typeof wouldHaveBack === 'boolean') { c.wouldHaveBack = wouldHaveBack; h[wouldHaveBack ? 'backYes' : 'backNo']++; }
-    }
+    if (typeof noShow !== 'boolean') fail(400, 'noShow must be true or false');
+    c.noShow = noShow;
     this.s.save();
     return this.view(call, org);
   }

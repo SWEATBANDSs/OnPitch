@@ -92,41 +92,72 @@ test('withdrawal of a confirmed player reopens the slot', () => {
   assert.equal(svc.getCall(org, c.id).status, 'open');
 });
 
-test('after-game record: showed up / played for the badge / would have back; tier stays self-declared', () => {
+test('matches played are counted automatically; organiser only flags no-shows', () => {
   const { svc, reg } = setup();
   const org = reg('Org', 7); const a = reg('A', 8);
   const tierBefore = svc.me(a).tier;
-  assert.deepEqual([svc.me(a).reliability, svc.me(a).badge, svc.me(a).wouldHaveBack], [null, null, null]);
-  const play = (start, now, fn) => {
+  assert.deepEqual([svc.me(a).matches, svc.me(a).squads, svc.me(a).reliability], [0, 0, null]);
+  const play = (start) => {
     clock = new Date('2026-10-01T12:00:00Z');
     const { call: c } = svc.createCall(org, call({ startsAt: start, minTier: 1 }));
     svc.claim(a, c.id); svc.decide(org, c.id, a.id, true);
-    clock = new Date(now);
-    fn(c);
+    return c;
   };
-  play('2026-10-02T19:00:00Z', '2026-10-03T00:00:00Z', (c) => {
-    svc.attendance(org, c.id, a.id, { attended: true, playedForBadge: true, wouldHaveBack: false });
-    assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: true })), 409); // once only
-  });
-  play('2026-10-09T19:00:00Z', '2026-10-10T00:00:00Z', (c) => {
-    assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: 'yes' })), 400);
-    svc.attendance(org, c.id, a.id, { attended: false, playedForBadge: false }); // badge/back ignored for no-shows
-  });
-  const p = svc.me(a);
-  assert.equal(p.reliability, 0.5);
-  assert.equal(p.badge, 1);
-  assert.equal(p.wouldHaveBack, 0);
-  assert.equal(p.tier, tierBefore);
-  assert.equal(code(() => svc.attendance(a, '', a.id, { attended: true })), 404);
+  const c1 = play('2026-10-02T19:00:00Z');
+  const c2 = play('2026-10-09T19:00:00Z');
+  assert.equal(svc.me(a).matches, 0); // nothing has kicked off yet
+  assert.equal(code(() => svc.setNoShow(org, c1.id, a.id, true)), 409);
+
+  clock = new Date('2026-10-03T00:00:00Z');
+  assert.equal(svc.me(a).matches, 1); // c1 counted with zero data entry
+  clock = new Date('2026-10-10T00:00:00Z');
+  assert.equal(svc.me(a).matches, 2);
+  assert.equal(svc.me(a).reliability, 1);
+
+  svc.setNoShow(org, c2.id, a.id, true);
+  assert.equal(svc.me(a).matches, 1);
+  assert.equal(svc.me(a).noShows, 1);
+  assert.equal(svc.me(a).reliability, 0.5);
+  svc.setNoShow(org, c2.id, a.id, false); // undo
+  assert.equal(svc.me(a).matches, 2);
+  assert.equal(svc.me(a).tier, tierBefore); // stats never move the tier
+  assert.equal(code(() => svc.setNoShow(a, c2.id, a.id, true)), 403);
+  assert.equal(code(() => svc.setNoShow(org, c2.id, a.id, 'yes')), 400);
 });
 
-test('attendance cannot be recorded before the game or by non-organisers', () => {
+test('cancelled games and unconfirmed claims do not count as played', () => {
   const { svc, reg } = setup();
-  const org = reg('Org', 7); const a = reg('A', 7);
-  const { call: c } = svc.createCall(org, call());
-  svc.claim(a, c.id); svc.decide(org, c.id, a.id, true);
-  assert.equal(code(() => svc.attendance(org, c.id, a.id, { attended: true })), 409);
-  assert.equal(code(() => svc.attendance(a, c.id, a.id, { attended: true })), 403);
+  const org = reg('Org', 7); const a = reg('A', 7); const b = reg('B', 7);
+  const { call: c } = svc.createCall(org, call({ slots: 2, startsAt: '2026-10-02T19:00:00Z' }));
+  svc.claim(a, c.id); svc.claim(b, c.id); svc.decide(org, c.id, a.id, true);
+  clock = new Date('2026-10-03T00:00:00Z');
+  assert.equal(svc.me(a).matches, 1);
+  assert.equal(svc.me(b).matches, 0); // never confirmed
+  svc.cancelCall(org, c.id);
+  assert.equal(svc.me(a).matches, 0);
+});
+
+test('squads: counted per organiser, idempotent, and give first call regardless of tier', () => {
+  const { svc, sent, reg } = setup();
+  const org = reg('Org', 7); const org2 = reg('Org2', 7); const mate = reg('Mate', 2);
+  assert.equal(code(() => svc.addToSquad(org, org.id)), 400);
+  assert.equal(code(() => svc.addToSquad(org, 'nope')), 404);
+  svc.addToSquad(org, mate.id); svc.addToSquad(org, mate.id);
+  svc.addToSquad(org2, mate.id);
+  assert.equal(svc.me(mate).squads, 2);
+  assert.equal(svc.me(mate).tier, 1); // still self-declared
+
+  const r = svc.createCall(org, call({ minTier: 3 }));
+  assert.equal(r.notified, 2); // org2 qualifies on tier; Mate is below tier but in the squad
+  assert.ok(sent.some(([id]) => id === mate.id));
+  assert.equal(svc.listCalls(mate).length, 1);
+  svc.claim(mate, r.call.id); // not blocked by tier
+
+  const r2 = svc.createCall(org2, call({ minTier: 4 }));
+  assert.equal(r2.call.minTier, 4);
+  svc.removeFromSquad(org, mate.id);
+  assert.equal(svc.me(mate).squads, 1);
+  assert.equal(code(() => svc.claim(reg('Rando', 2), r.call.id)), 403);
 });
 
 test('cancel notifies claimants; past calls rejected', () => {

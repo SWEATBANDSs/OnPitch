@@ -31,7 +31,7 @@ npm test
 | Monetisation toggle | `SLOT_FEE_PENCE` (undecided: per-slot vs tiered access) |
 
 ### Decisions on the open questions
-- **Tier policing:** none, deliberately. Ranking grassroots footballers' ability isn't our place, so the tier is whatever the player declares. After each game the organiser records only three yes/no facts: **showed up**, **played for the badge**, **would have back**. Profiles show these as percentages once there is history, and they never change the tier.
+- **Tier policing:** none, deliberately. Ranking grassroots footballers' ability isn't our place, so the tier is whatever the player declares. Profiles instead show things that are counted, not judged: **matches played** (automatic: a confirmed player has played once kick-off passes, unless the organiser flags a no-show) and **squads** (how many organisers have added them). Squad members get first call on that organiser's games regardless of tier. Goals/assists are deliberately not tracked: nobody keeps them up in 6-a-side.
 - **Chat:** fully off-app; `wa.me` links appear after confirmation.
 - **Platform:** web-first, mobile-friendly, vanilla JS (no build step).
 

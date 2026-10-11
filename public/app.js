@@ -15,10 +15,10 @@ async function api(path, method = 'GET', body) {
 }
 const when = (iso) => new Date(iso).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const pct = (v) => Math.round(v * 100) + '%';
-// Organiser-recorded history: showed up / played for the badge / would have back.
+// Counted automatically: matches played, and how many organisers have added them to a squad.
 const recordText = (p, bare) => {
-  const bits = [p.reliability != null && `${pct(p.reliability)} showed up`, p.badge != null && `${pct(p.badge)} played for the badge`,
-    p.wouldHaveBack != null && `${pct(p.wouldHaveBack)} would have back`].filter(Boolean);
+  const bits = [p.matches > 0 && `${p.matches} match${p.matches === 1 ? '' : 'es'}`, p.squads > 0 && `in ${p.squads} squad${p.squads === 1 ? '' : 's'}`,
+    p.noShows > 0 && p.reliability != null && `${pct(p.reliability)} showed up`].filter(Boolean);
   return bits.join(' · ') || (bare ? '' : 'new');
 };
 const form = (el) => Object.fromEntries(new FormData(el));
@@ -64,9 +64,8 @@ async function myView() {
     const claims = c.claims.map((p) => `<div class="muted">${esc(p.name)} · ${esc(p.tierName)} · skill ${p.skill}/ath ${p.athleticism} · ${recordText(p)} — ${p.status}
       ${p.status === 'pending' ? `<button data-accept="${c.id}|${p.id}">Accept</button><button class="sec" data-decline="${c.id}|${p.id}">Decline</button>` : ''}
       ${p.status === 'accepted' ? `<a href="${esc(p.whatsapp)}">WhatsApp</a>` : ''}
-      ${p.status === 'accepted' && past && p.attended == null ? `<div><label><input type="checkbox" id="b-${p.id}" checked style="width:auto"> Played for the badge</label>
-        <label><input type="checkbox" id="w-${p.id}" checked style="width:auto"> Would have back</label>
-        <button data-att="${c.id}|${p.id}|1">Showed up</button><button class="bad" data-att="${c.id}|${p.id}|0">No-show</button></div>` : ''}</div>`).join('');
+      ${p.status === 'accepted' ? `<button class="sec" data-squad="${p.id}|${p.inSquad ? 'rm' : 'add'}">${p.inSquad ? 'In my squad ✓' : 'Add to squad'}</button>` : ''}
+      ${p.status === 'accepted' && past ? `<button class="${p.noShow ? '' : 'bad'}" data-noshow="${c.id}|${p.id}|${p.noShow ? 0 : 1}">${p.noShow ? 'Undo no-show' : 'No-show'}</button>` : ''}</div>`).join('');
     return callCard(c, `${claims}${c.status !== 'cancelled' ? `<button class="sec" data-edit="${c.id}">Change time/venue</button><button class="bad" data-cancel="${c.id}">Cancel</button>` : ''}`);
   }).join('') || '<p class="muted">No games yet.</p>');
 }
@@ -105,9 +104,8 @@ async function render() {
   on('accept', ([id, p]) => api(`/calls/${id}/claims/${p}/accept`, 'POST'));
   on('decline', ([id, p]) => api(`/calls/${id}/claims/${p}/decline`, 'POST'));
   on('cancel', ([id]) => confirm('Cancel this call and notify everyone?') && api(`/calls/${id}/cancel`, 'POST'));
-  on('att', ([id, p, a]) => api(`/calls/${id}/attendance/${p}`, 'POST', a === '1'
-    ? { attended: true, playedForBadge: $('#b-' + p).checked, wouldHaveBack: $('#w-' + p).checked }
-    : { attended: false }));
+  on('noshow', ([id, p, v]) => api(`/calls/${id}/no-show/${p}`, 'POST', { noShow: v === '1' }));
+  on('squad', ([p, how]) => api(`/squad/${p}`, how === 'add' ? 'POST' : 'DELETE'));
   on('edit', async ([id]) => {
     const venue = prompt('New venue (leave blank to keep)'); const t = prompt('New kick-off, e.g. 2026-10-20T19:30 (blank to keep)');
     const body = {}; if (venue) body.venue = venue; if (t) body.startsAt = t;
